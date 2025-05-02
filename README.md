@@ -7,5 +7,6 @@ This project is focused on processing Scleractinia occurrence data from the **Gl
 - **GBIF Occurrence Data Processing**: The main R script that performs the data processing.
 - **Figures**:The main R script that performs the figures.
 - **NHMUKPortal26feb.csv**: The raw NHMUK Data Portal obtained after filtering by "scleractinia".
+- https://data.nhm.ac.uk/doi/10.5519/qd.9zwiyzec link for the iNHMUK Data Portal obtained after filtering by "zoology" 
 - https://www.gbif.org/occurrence/download/0022573-250127130748423 link for the initial GBIF dataset 
 
