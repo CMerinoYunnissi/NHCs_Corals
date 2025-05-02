@@ -1,0 +1,1368 @@
+########################################
+# Title: Figures
+# Author: Catalina Merino
+# Date: 2025-05-01
+# Description: Figures Scleractinia occurrence data from GBIF
+########################################
+
+####### Load Libraries #######
+library(ggplot2)
+library(dplyr)
+library(showtext)
+library(ggrastr)
+library(patchwork)
+library(geomtextpath)
+library(sysfonts)
+
+#I usedfor the figures my dataset from the occurrence cleaning process called NHCs_final
+
+#### Figure 1: Sankey ####
+
+# Load the necessary package
+library(networkD3)
+library(htmlwidgets)
+library(webshot)
+
+nodes <- data.frame(
+  name = c("GBIF Records (1,174,971)", 
+           "Species Level (972,320)",
+           "Recent Species (940,375)",
+           "Preserved Specimen (193,701)",
+           "Final NHCs (176,279)",
+           "Remove: Higher taxa (202,651)",
+           "Remove: Extinct (23,293)",
+           "Remove: Unmatched (8,652)",
+           "Remove: Duplicates (6,385)",     
+           "Remove: No Catalog Number (11,037)", 
+           "Remove: Non-preserved (746,674)") 
+)
+
+# Link data with updated target indices
+links <- data.frame(
+  source = c(0, 0,     # From GBIF Records
+             1, 1, 1,  # From Species Level
+             2, 2,     # From Recent Species
+             3, 3, 3), # From Preserved Specimen
+  target = c(1, 5,     # To Species Level and Higher taxa
+             2, 6, 7,  # To Recent Species, Extinct, and Unmatched
+             3, 10,    # To Preserved Specimen and Non-preserved (now index 10)
+             4, 8, 9), # To Final NHCs, Duplicates (8), and Empty Cat.No. (9)
+  value = c(972320, 202651,        # From GBIF
+            940375, 23293, 8652,   # From Species Level
+            193701, 746674,        # From Recent Species
+            176279, 6385, 11037)   # From Preserved Specimen
+)
+
+
+sn <- sankeyNetwork(
+  Links = links, 
+  Nodes = nodes,
+  Source = "source", 
+  Target = "target",
+  Value = "value", 
+  NodeID = "name",
+  fontSize = 14,
+  nodeWidth = 20,
+  height = 600,
+  width = 1000,
+  iterations = 15
+)
+sn
+
+library(webshot2)
+
+# 1. Save as html and then transform to pdf
+
+htmlwidgets::saveWidget(sankey, "sankey_diagram.html")
+
+
+
+
+
+
+#### Figure 2: PLOT specimens/observation ####
+
+font_add("Calibri", regular = "/Library/Fonts/Calibri.ttf")
+showtext_auto()
+
+# Summarize data by year and type (Observations vs Specimens)
+summary_data_fig2 <- EXTANT %>%
+  mutate(
+    # Group basisOfRecord into two main categories
+    new_basisOfRecord = case_when(
+      basisOfRecord %in% c("HUMAN_OBSERVATION", "MACHINE_OBSERVATION", 
+                           "OBSERVATION", "OCCURRENCE", "MATERIAL_CITATION") ~ "Observations",
+      basisOfRecord %in% c("PRESERVED_SPECIMEN", "LIVING_SPECIMEN", "MATERIAL_SAMPLE") ~ "Specimens",
+      TRUE ~ "Other"  # Keep others, just in case
+    )) %>%
+  group_by(year, new_basisOfRecord) %>%
+  summarise(record_count = n(), .groups = "drop")
+
+sum(summary_data_fig2$record_count[!is.na(summary_data_fig2$year)])
+sum(summary_data_fig2$record_count) #940375
+# plot
+a <- ggplot(summary_data_fig2, aes(x = year, y = record_count, fill = new_basisOfRecord)) +
+  geom_area(alpha = 0.8, na.rm = TRUE) +  # Stacked area plot
+  scale_fill_manual(
+    values = c("Observations" = "#80DEEA", "Specimens" = "#EA8D2D")
+  ) +
+  labs(
+    x = "Years",
+    y = "No. records"
+  ) +
+  theme_minimal(base_size = 11, base_family = "Calibri") +
+  theme(
+    panel.border = element_rect(color = "black", fill = NA, size = 0.5),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 11),
+    axis.text.y = element_text(size = 11),
+    axis.title = element_text(size = 11),
+    legend.position = "none",
+    panel.grid.major = element_line(color = "gray70", size = 0.1),  
+    panel.grid.minor = element_line(color = "gray85", size = 0.1),  
+    axis.ticks = element_line(color = "black")
+  ) +
+  scale_x_continuous(
+    breaks = seq(1820, max(summary_data_fig2$year, na.rm = TRUE), by = 10), 
+    limits = c(1820, max(summary_data_fig2$year, na.rm = TRUE))
+  ) +
+  scale_y_continuous(
+    breaks = seq(0, max(summary_data_fig2$record_count, na.rm = TRUE), by = 5000)
+  )
+
+print(a)
+
+# Summarize data by year and type (Observations vs Specimens) using species
+summary_species_fig2 <- EXTANT %>%
+  mutate(
+    new_basisOfRecord = case_when(
+      basisOfRecord %in% c("HUMAN_OBSERVATION", "MACHINE_OBSERVATION", 
+                           "OBSERVATION", "OCCURRENCE", "MATERIAL_CITATION") ~ "Observations",
+      basisOfRecord %in% c("PRESERVED_SPECIMEN", "LIVING_SPECIMEN", "MATERIAL_SAMPLE") ~ "Specimens",
+      TRUE ~ "Other"
+    )) %>%
+  group_by(year, new_basisOfRecord) %>%
+  summarise(species_count = n_distinct(ScientificName_accepted), .groups = "drop")
+
+# Plot
+b <- ggplot(summary_species_fig2, aes(x = year, y = species_count, fill = new_basisOfRecord)) +
+  geom_area(alpha = 0.8, na.rm = TRUE) +  # Stacked area plot
+  scale_fill_manual(
+    values = c("Observations" = "#80DEEA", "Specimens" = "#EA8D2D")
+  ) +
+  labs(
+    x = "Years",
+    y = "No. species"
+  ) +
+  theme_minimal(base_size = 11, base_family = "Calibri")+
+  theme(
+    panel.border = element_rect(color = "black", fill = NA, size = 0.5),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 11),
+    axis.text.y = element_text(size = 11),
+    axis.title = element_text(size = 11),
+    legend.position = "none",
+    panel.grid.major = element_line(color = "gray70", size = 0.1),  
+    panel.grid.minor = element_line(color = "gray85", size = 0.1),  
+    axis.ticks = element_line(color = "black")
+  ) +
+  scale_x_continuous(
+    breaks = seq(1820, max(summary_species_fig2$year, na.rm = TRUE), by = 10), 
+    limits = c(1820, max(summary_species_fig2$year, na.rm = TRUE))
+  ) +
+  scale_y_continuous(
+    breaks = seq(0, max(summary_species_fig2$species_count, na.rm = TRUE), by = 100)
+  )
+
+combined_plot <- a /b 
+combined_plot
+
+# Add labels "A" and "B" to the top-left of each plot
+combined_plot <- combined_plot + 
+  plot_annotation(
+    tag_levels = "A",  # This specifies that the labels will start from "A" 
+    tag_suffix = ""    # Removes suffix after the label (default is a period)
+  )
+
+# Print the final plot
+print(combined_plot)
+
+
+
+ggsave(
+  filename = "Fig2.pdf",
+  plot = combined_plot,
+  width = 8.27,     
+  height = 5.85,    
+  units = "in",
+  dpi = 300
+)
+
+
+
+
+
+
+#### Figure 3: temporal distribution ####
+#add font
+font_add("Calibri", regular = "/System/Library/Fonts/Supplemental/Calibri.ttf")
+showtext_auto()
+
+# Step 1: Calculate total records per year 
+total_records_per_year <- NHCs_final %>%
+  count(Year, name = "records") %>%
+  filter(!is.na(Year))
+
+
+
+# Step 2: Filter data for plotting (1820–2024)
+filtered_data <- total_records_per_year %>%
+  filter(!is.na(records), Year >= 1820, Year <= 2025)
+
+
+
+# Step 3: Create the plot
+Fig3 <- ggplot(filtered_data) +
+  # Background for WWII (1939–1945)
+  annotate("rect", xmin = 1939, xmax = 1945, ymin = 0, ymax = Inf,
+           fill = "gray90", alpha = 0.5) +
+  
+  # Background from 1995 to 2024
+  annotate("rect", xmin = 1995, xmax = 2024, ymin = 0, ymax = Inf,
+           fill = "#BBDEFB", alpha = 0.3) +
+  # Label for WWII
+  annotate("text", x = 1942, y = 6000, label = "WWII",
+           color = "gray40", size = 5, angle = 0, family = "Calibri") +
+  
+  # Label for CITES (assuming post-1995 era)
+  annotate("text", x = 2005, y = 6000, label = "CITES",
+           color = "#1565C0", size = 5, angle = 0, family = "Calibri") +
+  
+  # Main bar plot
+  geom_bar(
+    aes(x = Year, y = records),
+    stat = "identity",
+    fill = "orange",
+    width = 0.8
+  ) +
+  labs(
+    x = "Year",
+    y = "No. of records"
+  ) +
+  theme_minimal(base_size = 11, base_family = "Calibri") +
+  theme(
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5),
+    axis.text = element_text(size = 11, family = "Calibri"),
+    axis.title = element_text(size = 11, family = "Calibri"),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.ticks = element_line(color = "black", linewidth = 0.3),
+    panel.grid.major = element_line(color = "gray70", linewidth = 0.1),
+    panel.grid.minor = element_line(color = "gray85", linewidth = 0.1),
+    legend.position = "none",
+    plot.margin = margin(10, 10, 10, 10)
+  ) +
+  scale_y_continuous(
+    limits = c(0, 7000),
+    expand = c(0, 100),
+    breaks = seq(0, 7000, by = 1000)
+  ) +
+  scale_x_continuous(
+    limits = c(1820, 2024),
+    breaks = seq(1820, 2024, by = 10)
+  )
+
+print(Fig3)
+
+# Step 4: Save the plot to high-quality PDF
+ggsave(
+  filename = "Fig3.pdf",
+  plot = Fig3,
+  device = grDevices::pdf,  
+  width = 8.27,
+  height = 4,
+  units = "in")
+
+
+
+#calculate the decline from 1939 to the average or total during 1940–1945
+# 1. Get number of records in 1939
+records_1939 <- nhcs_timeline %>%
+  filter(Year == 1939) %>%
+  nrow()
+
+# 2. Get number of records per year from 1940 to 1945
+records_1940_1945 <- nhcs_timeline %>%
+  filter(Year >= 1940, Year <= 1945) %>%
+  group_by(Year) %>%
+  summarise(records = n())
+
+# 3. Calculate the average and median number of records during 1940-1945
+average_records_1940_1945 <- mean(records_1940_1945$records)
+median_records_1940_1945 <- median(records_1940_1945$records)
+
+# 4. Calculate the decline (%)
+percent_decline <- ((records_1939 - average_records_1940_1945) / records_1939) * 100
+percent_decline_median <- ((records_1939 - median_records_1940_1945) / records_1939) * 100
+
+# 5. Print results
+cat(sprintf("Records in 1939: %d\n", records_1939)) #Records in 1939: 91
+cat(sprintf("Average records 1940-1945: %.1f\n", average_records_1940_1945)) #Average records 1940-1945: 63.0
+cat(sprintf("Percentage decline from 1939 to 1940–1945: %.1f%%\n", percent_decline)) #Percentage decline from 1939 to 1940–1945: 30.8%
+
+cat(sprintf("Median records 1940-1945: %.1f\n", median_records_1940_1945)) # Median records 1940-1945: 27.0
+cat(sprintf("Percentage decline from 1939 to 1940–1945 (based on median): %.1f%%\n", percent_decline_median)) #Percentage decline from 1939 to 1940–1945 (based on median): 70.3%
+
+
+
+#PLOT 1935-1950
+# Prepare the data: filter years 1935–1950 and count records per year
+records_1935_1950 <- nhcs_timeline %>%
+  filter(Year >= 1935, Year <= 1950) %>%
+  group_by(Year) %>%
+  summarise(records = n())
+
+# Plot
+ggplot(records_1935_1950, aes(x = Year, y = records)) +
+  geom_line(color = "steelblue", size = 1.2) +
+  geom_point(color = "steelblue", size = 2) +
+  geom_vline(xintercept = 1939.5, linetype = "dashed", color = "red", size = 0.8) +
+  annotate("text", x = 1942, y = max(records_1935_1950$records) * 0.8, label = "WWII Decline", color = "red", size = 4, angle = 0) +
+  labs(
+    x = "Year",
+    y = "Number of Records"
+  ) +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "Calibri", size = 12),
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(size = 11)
+  )
+
+
+
+
+
+#% of records in a specific period (e.g., 1974–1986)
+# 1. Prepare data: filter years between 1820 and 2020
+nhcs_timeline <- NHCs_final %>%
+  filter(!is.na(Year), Year >= 1820, Year <= 2020)
+# 2. Total records and total timeline length
+total_records <- nrow(nhcs_timeline)
+total_years <- 2020 - 1820 + 1  # Inclusive
+# 3. Subset for the period 1974–1986
+subset_period <- nhcs_timeline %>%
+  filter(Year >= 1974, Year <= 1986)
+# 4. Calculate
+subset_records <- nrow(subset_period)
+subset_years <- 1986 - 1974 + 1  # Inclusive
+# 5. Percentages
+percent_records <- (subset_records / total_records) * 100
+percent_years <- (subset_years / total_years) * 100
+# 6. Print results
+cat("From 1974 to 1986:\n")
+cat(sprintf("Records: %d (%.1f%% of all records)\n", subset_records, percent_records))
+cat(sprintf("Years: %d years (%.1f%% of the full timeline)\n", subset_years, percent_years))
+
+#From 1974 to 1986:
+#Records: 39456 (29.8% of all records)
+#Years: 13 years (6.5% of the full timeline)
+
+
+
+
+
+#### Figure 4: temporal distribution and institutions ####
+# Load necessary libraries
+library(dplyr)
+library(ggplot2)
+library(showtext)
+#add font
+font_add("Calibri", regular = "/System/Library/Fonts/Supplemental/Calibri.ttf")
+showtext_auto()
+
+# Step 1: Filter records with valid Year
+nhcs_binned <- NHCs_final %>%
+  filter(!is.na(Year)) %>%
+  mutate(Year_bin = floor(Year / 10) * 10)
+
+
+
+# Step 2: Identify top 10 publishers overall
+top_publishers <- nhcs_binned %>%
+  count(publisher, name = "total") %>%
+  arrange(desc(total)) %>%
+  slice_head(n = 10) %>%
+  pull(publisher)
+print(top_publishers)
+
+#[1] "Queensland Museum"                                              
+#[2] "National Museum of Natural History, Smithsonian Institution"    
+#[3] "MNHN - Museum national d'Histoire naturelle"                    
+#[4] "Naturalis Biodiversity Center"                                  
+#[5] "Western Australian Museum"                                      
+#[6] "Natural History Museum"                                         
+#[7] "The National Institute of Water and Atmospheric Research (NIWA)"
+#[8] "National Museum of Nature and Science, Japan"                   
+#[9] "Bernice Pauahi Bishop Museum"                                   
+#[10] "Florida Museum of Natural History" 
+
+#use institutionCode to assign codes to top publishers
+top_publishers_info <- nhcs_binned %>%
+  filter(publisher %in% top_publishers) %>%
+  distinct(publisher, institutionCode)
+print(top_publishers_info)
+
+
+# Step 3: Assign "Other" to publishers not in top 10
+nhcs_binned <- nhcs_binned %>%
+  mutate(publisher_group = ifelse(publisher %in% top_publishers, publisher, "Other"))
+
+
+# Define short codes for top publishers
+publisher_codes <- c(
+  "Queensland Museum" = "QM",
+  "National Museum of Natural History, Smithsonian Institution" = "USNM",
+  "MNHN - Museum national d'Histoire naturelle" = "MNHN",
+  "Naturalis Biodiversity Center" = "Naturalis",
+  "Western Australian Museum" = "WAM",
+  "Natural History Museum" = "NHMUK",
+  "The National Institute of Water and Atmospheric Research (NIWA)" = "NIWA",
+  "National Museum of Nature and Science, Japan" = "NMNS",
+  "Bernice Pauahi Bishop Museum" = "BPBM",
+  "Florida Museum of Natural History" = "UF",
+  "Other" = "Other"
+)
+
+
+# Add publisher codes to the data
+summary_binned <- nhcs_binned %>%
+  mutate(publisher_code = recode(publisher_group, !!!publisher_codes))
+
+
+# Summarize data to create the 'records' column
+summary_binned <- summary_binned %>%
+  group_by(Year_bin, publisher_code) %>%
+  summarise(records = n(), .groups = "drop")
+
+# Set factor level order so "Other" is at the bottom of the bars
+summary_binned <- summary_binned %>%
+  mutate(publisher_code = factor(publisher_code, levels = rev(c("Other", setdiff(unique(publisher_code), "Other")))))
+# Filter out any rows where 'Year_bin' is outside the desired range
+summary_binned <- summary_binned %>%
+  filter(Year_bin >= 1820 & Year_bin <= 2020)
+
+# Plot
+Fig4 <- ggplot(summary_binned, aes(x = Year_bin, y = records, fill = publisher_code)) +
+  geom_col(position = "stack")+
+  scale_fill_manual(
+    values = c(
+      "QM" = "#1f77b4",  # A medium blue
+      "USNM" = "#ff7f0e",  # A warm orange
+      "MNHN" = "#2ca02c",  # A green
+      "Naturalis" = "#d62728",  # A red
+      "WAM" = "#9467bd",  # A purple
+      "NHMUK" = "#8c564b",  # A brownish color
+      "NIWA" = "#e377c2",  # A pink
+      "NMNS" = "#7f7f7f",  # Grey
+      "BPBM" = "#bcbd22",  # Yellow-green
+      "UF" = "#17becf",  # A cyan color
+      "Other" = "#a9a9a9"  # Neutral grey
+    ),
+    name = "Institution"
+  ) +
+  labs(
+    x = "Decade", y = "No. of records"
+  ) +
+  scale_x_continuous(
+    breaks = seq(1820, 2020, by = 10),
+    limits = c(1815, 2025)
+  ) +
+  scale_y_continuous(
+    limits = c(0, 35000),  # Explicit upper bound
+    breaks = seq(0, 35000, by = 5000),
+    expand = c(0, 430)
+  )+
+  theme_minimal(base_size = 12, base_family = "Calibri") +
+  theme(
+      panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5),
+      axis.text = element_text(size = 11, family = "Calibri"),
+      axis.title = element_text(size = 11, family = "Calibri"),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      axis.ticks = element_line(color = "black", linewidth = 0.3),
+      panel.grid.major = element_line(color = "gray70", linewidth = 0.1),
+      panel.grid.minor = element_line(color = "gray85", linewidth = 0.1),
+      legend.position = "right",
+      plot.margin = margin(10, 10, 10, 10)
+    )
+
+
+print(Fig4)
+
+# Save the plot as a PDF
+ggsave(
+  filename = "Fig4.pdf", plot = Fig4, width = 8, height = 4, units = "in", dpi = 300
+)
+
+
+
+
+# some results 
+# Binning by decade and calculating counts and percentages
+nhcs_binned_summary <- NHCs_final %>%
+  filter(!is.na(Year)) %>%
+  mutate(Year_bin = floor(Year / 10) * 10) %>%
+  filter(Year_bin >= 1820 & Year_bin <= 2020) %>%
+  group_by(Year_bin) %>%
+  summarise(
+    records_per_decade = n()
+  ) %>%
+  mutate(
+    total_records = sum(records_per_decade),
+    percent_total = (records_per_decade / total_records) * 100
+  )
+print(nhcs_binned_summary)
+
+# 1. Filter data to just 1976
+data_1976 <- NHCs_final %>%
+  filter(Year == 1976)
+# 2. Total number of records globally in 1976
+total_1976 <- nrow(data_1976)
+# 3. Number of records from Queensland Museum 
+qm_1976 <- data_1976 %>%
+  filter(publisher == "Queensland Museum") %>%
+  nrow()
+# 4. Calculate the % contribution
+percent_qm_1976 <- (qm_1976 / total_1976) * 100
+# 5. Print results
+cat(sprintf("Total records in 1976: %d\n", total_1976)) #Total records in 1976: 6037
+cat(sprintf("Queensland Museum records in 1976: %d (%.1f%% of global output)\n", qm_1976, percent_qm_1976)) #Queensland Museum records in 1976: 2231 (37.0% of global output)
+
+
+
+colnames(summary_binned)
+# Filter data for QM in 1970 and 1980
+qm_1970s <- summary_binned %>%
+  filter(Year_bin == "1970", publisher_code == "QM") %>%
+  summarise(total_records = sum(records)) %>%
+  pull(total_records)
+
+
+qm_1980s <- summary_binned %>%
+  filter(Year_bin == "1980", publisher_code == "QM") %>%
+  summarise(total_records = sum(records)) %>%
+  pull(total_records)
+
+# Calculate percentage decline
+percent_decline_decades <- ((qm_1970s - qm_1980s) / qm_1970s) * 100
+
+# Print results
+cat(sprintf("QM records in 1970s: %d\n", qm_1970s)) #QM records in 1970s: 12398
+cat(sprintf("QM records in 1980s: %d\n", qm_1980s)) #QM records in 1980s: 2710
+cat(sprintf("Percentage decline from 1970s to 1980s: %.1f%%\n", percent_decline_decades)) #Percentage decline from 1970s to 1980s: 78.1%
+
+
+#MNHN + USNM's percentage of global records in the 1970s and 1980s
+# Summarise total global records for each decade
+global_1970s <- summary_binned %>%
+  filter(Year_bin == "1970") %>%
+  summarise(total_records = sum(records)) %>%
+  pull(total_records)
+
+global_1980s <- summary_binned %>%
+  filter(Year_bin == "1980") %>%
+  summarise(total_records = sum(records)) %>%
+  pull(total_records)
+
+
+
+# Summarise MNHN + USNM records for 1980
+global_1980s <- summary_binned %>%
+  filter(Year_bin == "1980") %>%
+  summarise(total_records = sum(records)) %>%
+  pull(total_records)
+
+mnhn_1980s <- summary_binned %>%
+  filter(Year_bin == "1980", publisher_code == "MNHN") %>%
+  summarise(total_records = sum(records), .groups = "drop") %>%
+  pull(total_records)
+
+usnm_1980s <- summary_binned %>%
+  filter(Year_bin == "1980", publisher_code == "USNM") %>%
+  summarise(total_records = sum(records), .groups = "drop") %>%
+  pull(total_records)
+
+# Calculate percentage contributions
+percent_mnhn_1980s <- (mnhn_1980s / global_1980s) * 100
+percent_usnm_1980s <- (usnm_1980s / global_1980s) * 100
+
+# Print results
+cat(sprintf("MNHN ontribution in 1980s: %.1f%%\n", percent_mnhn_1980s)) #MNHN ontribution in 1980s: 23.7%
+cat(sprintf("USNM contribution in 1980s: %.1f%%\n", percent_usnm_1980s)) #USNM contribution in 1980s: 19.7%
+
+
+
+
+
+# Calculate mean and standard deviation of USNM records per decade
+usnm_stats <- summary_binned %>%
+  filter(publisher_code == "USNM") %>%
+  group_by(Year_bin) %>%
+  summarise(records_decade = sum(records), .groups = "drop") %>%
+  summarise(mean_records = mean(records_decade),
+            sd_records = sd(records_decade))
+
+# Pull values
+mean_usnm <- usnm_stats$mean_records
+sd_usnm <- usnm_stats$sd_records
+
+# Print results
+cat(sprintf("Smithsonian output per decade: %.0f±%.0f records\n", mean_usnm, sd_usnm)) #Smithsonian output per decade: 1636±1804 records
+
+
+
+
+#### Figure 5: species/records ####
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+library(extrafont) 
+library(grid) 
+
+
+
+#calculating % of species account for more than 50% or records
+species_n_percentage <- NHCs_final %>%
+  count(ScientificName_accepted, Family) %>%
+  arrange(desc(n)) %>%
+  mutate(
+    species_index = row_number(),
+    percent = round((n / sum(n)) * 100, 2)  # 1,561 species NHCs
+  )
+
+species_n_50 <- species_n_percentage %>%
+  arrange(desc(n)) %>%  # Make sure it's sorted by most records
+  mutate(
+    cum_percent = cumsum(percent)  # Cumulative percentage
+  ) %>%
+  filter(cum_percent <= 50 | row_number() == min(which(cum_percent >= 50)))  # Keep until reaching 50%
+
+n_species_50 <- nrow(species_n_50)
+print(n_species_50)
+
+
+# Step 1: Count species and assign an index
+species_n <- NHCs_final %>%
+  count(ScientificName_accepted, Family) %>%
+  arrange(desc(n)) %>%
+  mutate(species_index = row_number())
+
+#
+top_3_species <- species_n %>%
+  slice_max(order_by = n, n = 3) %>%
+  mutate(
+    label_expr = paste0("italic('", ScientificName_accepted, "')")
+  )
+
+
+
+
+Fig5 <- ggplot(species_n, aes(x = species_index, y = n)) +
+  geom_point(color = "lightpink", size = 0.5, alpha = 0.7) +  # Points for species
+  
+  # Add dashed vertical line at 134 species (50% threshold)
+  geom_vline(xintercept = 134, linetype = "dashed", color = "darkgray", linewidth = 0.2) +
+  
+  # Top 3 species labels
+  geom_text_repel(
+    data = top_3_species,
+    aes(x = species_index, y = n, label = label_expr),
+    size = 3,
+    parse = TRUE,
+    color = "black",
+    box.padding = 0.5,
+    min.segment.length = 0,
+    segment.color = NA
+  ) +
+  
+  # Red circle around species number 100
+  geom_point(
+    data = species_n[100,], 
+    aes(x = species_index, y = n),
+    color = "red", size = 4, shape = 1, stroke = 1
+  ) +
+  annotate("text", 
+           x = species_n[100,]$species_index, 
+           y = species_n[100,]$n,  # Same y-value as circle
+           label = "A", 
+           color = "red", 
+           size = 3,
+           vjust = -1.5) +  # Nudge text upward without scaling
+  # Circle around species index 1102
+  geom_point(
+    data = species_n[1102,], 
+    aes(x = species_index, y = n),
+    color = "blue", size = 4, shape = 1, stroke = 1
+  ) +
+  annotate("text", 
+           x = species_n[1102,]$species_index, 
+           y = species_n[1102,]$n,  # Same y-value as circle
+           label = "B", 
+           color = "blue", 
+           size = 3,
+           vjust = -1.5) +  # Consistent nudge
+  # Axis labels and scales
+  labs(x = "Species rank", y = "No. of records") +
+  scale_x_continuous(
+    breaks = c(seq(0, nrow(species_n), by = 100)),  
+    expand = c(0.05, 0.01),
+    limits = c(0, 1561)
+  ) +
+  scale_y_continuous(
+    limits = c(0, 2000),
+    breaks = c(0, 500, 1000, 1500, 2000),
+    expand = c(0.02, 0.01)
+  ) +
+  
+  # Theme
+  theme(
+    text = element_text(family = "Calibri", size = 11),
+    axis.text.x = element_text(color = "black"),
+    axis.ticks.x = element_line(color = "black"),
+    axis.text.y = element_text(color = "black"),
+    axis.ticks.y = element_line(color = "black"),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.border = element_rect(color = "black", fill = NA, size = 0.5),
+    panel.grid.major = element_line(color = "lightgrey", size = 0.3, linetype = "dotted"),
+    panel.grid.minor = element_blank()
+  )
+
+
+# Save the plot as a PDF
+ggsave(
+  filename = "Fig5.pdf", plot = Fig5, width = 7, height = 5, units = "in", dpi = 600
+)
+
+
+
+species_n_publisher <- NHCs_final %>%
+  count(ScientificName_accepted, Family, publisher) %>%  # Add Publisher to count()
+  arrange(desc(n)) %>%
+  mutate(
+    species_index = row_number(),
+    percent = round((n / sum(n)) * 100, 2)
+  )
+
+
+
+
+
+#### Figure 6: ZOO/AZOO ####
+library(ggplot2)
+library(dplyr)
+library(ggpubr)  
+library(ggpie)
+library(RColorBrewer)
+library(ggrepel)
+
+#plot ZOO/AZOO 
+#remove NA for plot
+species_counts_zoo <- NHCs_final %>%
+  filter(!zooxanthellate=="NA") %>%  
+  group_by(zooxanthellate) %>%
+  summarise(total_species = n_distinct(ScientificName_accepted))
+#azooxanthellate 732
+#zooxanthellate 816
+#both 12
+
+
+
+# Prepare data for violin/boxplot: records per species and category
+species_counts_zoo_classified <- NHCs_final %>%
+  filter(!is.na(zooxanthellate)) %>%
+  group_by(ScientificName_accepted, zooxanthellate) %>%
+  summarise(records = n(), .groups = "drop")
+
+
+# Get top 3 species with most records
+top_species <- species_counts_zoo_classified %>%
+  slice_max(order_by = records, n = 3) %>%
+  mutate(
+    label_expr = paste0("italic('", ScientificName_accepted, "')")
+  )
+
+
+
+# Plot
+Fig6 <- ggplot(species_counts_zoo_classified, aes(x = zooxanthellate, y = records, fill = zooxanthellate)) +
+  geom_violin(trim = FALSE, alpha = 0.7) +
+  geom_boxplot(width = 0.05, fill = "white", outlier.size = 1) +
+  scale_fill_manual(values = c(
+    "zooxanthellate" = "lightgreen",
+    "azooxanthellate" = "lightblue",
+    "both" = "lightyellow"
+  )) +
+  geom_text(data = species_counts_zoo,
+            aes(x = zooxanthellate, y = -300,
+                label = paste0("N = ", total_species)),
+            inherit.aes = FALSE,
+            family = "Calibri",  # Changed to Calibri
+            size = 4,
+            color = "black") +
+
+  labs(y = "No. of records per species", x = NULL) +  
+  theme_minimal() +
+  theme(
+    axis.title.y = element_text(family = "Calibri", size = 11),
+    axis.text.x = element_text(family = "Calibri", size = 11),
+    axis.text.y = element_text(family = "Calibri", size = 11),
+    panel.grid.major = element_line(color = "gray90"),
+    panel.grid.minor = element_line(color = "gray95"),
+    panel.border = element_rect(color = "black", fill = NA, size = 0.8),
+    legend.position = "none"
+  )
+
+print(Fig6)
+
+# Save the plot as PDF
+ggsave(
+  filename = "Fig6.pdf",
+  plot = Fig6,
+  width = 5,
+  height = 5,
+  units = "in",
+  dpi = 300
+)
+
+
+# Calculate summary stats per symbiotic category
+summary_stats <- species_counts_zoo_classified %>%
+  group_by(zooxanthellate) %>%
+  summarise(
+    n_species = n(),
+    median_records = median(records),
+    mean_records = mean(records),
+    sd_records = sd(records),
+    min_records = min(records),
+    q1_records = quantile(records, 0.25),
+    q3_records = quantile(records, 0.75),
+    max_records = max(records)
+  )
+
+
+# Function to detect outliers
+detect_outliers <- function(x) {
+  q1 <- quantile(x, 0.25)
+  q3 <- quantile(x, 0.75)
+  iqr <- q3 - q1
+  lower_bound <- q1 - 1.5 * iqr
+  upper_bound <- q3 + 1.5 * iqr
+  outliers <- x[x < lower_bound | x > upper_bound]
+  return(length(outliers))  # Number of outliers
+}
+
+# Apply per symbiotic category
+outlier_counts <- species_counts_zoo_classified %>%
+  group_by(zooxanthellate) %>%
+  summarise(
+    num_outliers = detect_outliers(records)
+  )
+
+print(outlier_counts)
+
+
+
+
+
+
+#### Figure 7: FAMILY ####
+
+# Count occurrences per species
+species_counts <- NHCs_final %>%
+  count(ScientificName_accepted, Family) %>%
+  arrange(desc(n))
+
+top_3_species <- species_counts %>%
+  slice_max(n, n = 3) %>%
+  mutate(label_expr = paste0("italic('", ScientificName_accepted, "')"))
+
+# Count records per family and sort in descending order
+family_counts <- NHCs_final %>%
+  count(Family, name = "count") %>%
+  arrange(desc(count)) %>%
+  mutate(percentage = round((count / sum(count)) * 100, 1))  # Round to one decimal place
+print(family_counts)
+
+  #Acroporidae
+  #Merulinidae
+  #Caryophylliidae
+
+
+
+# --- Calculate expected species per family ---
+expected_species_per_family <- species_status %>%
+  filter(
+    Rank == "species",
+    Status == "EXTANT",
+    !is.na(ScientificName_accepted),
+    ScientificName_accepted != ""
+  ) %>%
+  group_by(Family) %>%
+  summarise(Expected = n_distinct(ScientificName_accepted), .groups = "drop")
+
+# --- Calculate observed species per family ---
+observed_species_per_family <- NHCs_final %>%
+  filter(!is.na(ScientificName_accepted), !is.na(Family)) %>%
+  group_by(Family) %>%
+  summarise(Observed = n_distinct(ScientificName_accepted), .groups = "drop")
+
+# --- Merge expected and observed, calculate missing and percentage observed ---
+species_per_family <- expected_species_per_family %>%
+  left_join(observed_species_per_family, by = "Family") %>%
+  mutate(
+    Observed = replace_na(Observed, 0),
+    Missing = Expected - Observed,
+    Percentage = (Observed / Expected) * 100
+  ) %>%
+  arrange(desc(Expected))
+
+# --- Pivot to long format for plotting ---
+species_long <- species_per_family %>%
+  select(Family, Observed, Missing) %>%
+  pivot_longer(cols = c(Observed, Missing), names_to = "Status", values_to = "Count") %>%
+  mutate(Status = factor(Status, levels = c("Observed", "Missing")))
+
+# --- Filter species_per_family for labels < 100% ---
+labels_df <- species_per_family %>%
+  filter(Percentage < 100)
+
+# --- Plot ---
+Fig7 <- ggplot(species_long, aes(x = reorder(Family, Count), y = Count, fill = Status)) +
+  geom_col(width = 0.85) +
+  coord_flip() +
+  # Add percentage labels only when <100, always outside the bar
+  geom_text(
+    data = labels_df,
+    aes(x = Family, y = Expected, label = paste0(round(Percentage, 1), "%")),
+    hjust = -0.1,
+    size = 3.5,
+    inherit.aes = FALSE
+  ) +
+  scale_fill_manual(
+    values = c("Observed" = "lightblue", "Missing" = "red"),
+    labels = c("Documented", "Missing")
+  ) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +  # Room for labels
+  theme_minimal(base_size = 12, base_family = "Calibri") +
+  labs(
+    x = "Family",
+    y = "No. of species",
+    fill = NULL
+  ) +
+  theme(
+    axis.text.y = element_text(size = 11, family = "Calibri"),
+    axis.text.x = element_text(size = 11, family = "Calibri"),
+    axis.title = element_text(size = 11, family = "Calibri"),
+    legend.position = "right",
+    plot.margin = margin(10, 10, 10, 10)
+  )
+
+print(Fig7)
+
+# --- Save plot ---
+ggsave(
+  filename = "Fig7.pdf",
+  plot = Fig7,
+  width = 8.6,
+  height = 6,
+  units = "in",
+  dpi = 300
+)
+
+
+
+
+
+
+
+#### Figure 8: MAP ####
+library(dplyr)
+library(ggplot2)
+library(sf) 
+library(raster) 
+library(viridis)
+library(rnaturalearth)
+
+
+institutions <-  data.frame(
+  code = c("QM", "USNM", "MNHN", "WAM", "Naturalis", "NIWA", "USGS", "AM", "UF", "CONABIO"),
+  lat = c(-27.4733, 38.8914, 48.8422, -32.0528, 52.1647, -36.977486, 38.9470, -33.8742, 29.6361, 19.3014),
+  lon = c(153.0183, -77.0258, 2.3561, 115.7367, 4.4733, 174.826152, -77.3675, 151.2133, -82.3700, -99.1864)
+)
+
+
+invalid_coordinates <- NHCs_final %>%
+  filter(
+    decimalLongitude == 0 & decimalLatitude == 0 |  # Coordinates are 0
+      decimalLongitude < -180 | decimalLongitude > 180 |  # Longitude outside valid range
+      decimalLatitude < -90 | decimalLatitude > 90  # Latitude outside valid range
+  )%>%
+# Rearrange columns so that decimalLatitude, decimalLongitude, locality, and publisher come first
+  dplyr::select(decimalLatitude, decimalLongitude, locality, publisher, everything())
+#21 all of them from University of Kansas Biodiversity Institute
+
+
+
+# Step 1: Filter out records with missing coordinates
+NHCs_final_filtered <- NHCs_final %>%
+  filter(!is.na(decimalLatitude) & !is.na(decimalLongitude))
+
+NHCs_final_filtered <- NHCs_final %>%
+  filter(
+    !(decimalLongitude == 0 & decimalLatitude == 0 |  # Exclude records where both coordinates are 0
+        decimalLongitude < -180 | decimalLongitude > 180 |  # Exclude longitude outside valid range
+        decimalLatitude < -90 | decimalLatitude > 90)  # Exclude latitude outside valid range
+  )
+
+
+
+
+
+# Step 2: Create 5° grid
+# Create a 5-degree raster grid over the world
+r <- raster(
+  xmn = -180, xmx = 180,
+  ymn = -90, ymx = 90,
+  resolution = 5,
+  crs = "+proj=longlat +datum=WGS84"
+)
+
+points_sf <- st_as_sf(NHCs_final_filtered, coords = c("decimalLongitude", "decimalLatitude"), crs = 4326)
+
+# Assign each point to a grid cell
+NHCs_final_filtered$cell_id <- cellFromXY(r, st_coordinates(points_sf))
+
+# Calculate species richness (unique species per grid cell)
+richness <- NHCs_final_filtered %>%
+  group_by(cell_id) %>%
+  summarise(richness = n_distinct(ScientificName_accepted)) %>%
+  ungroup()
+
+# Create a raster with richness values
+richness_raster <- raster(r)
+richness_raster[richness$cell_id] <- richness$richness
+
+
+# Convert raster to dataframe for plotting
+rich_df <- as.data.frame(rasterToPoints(richness_raster))
+colnames(rich_df) <- c("lon", "lat", "richness")
+
+
+rich_poly <- rasterToPolygons(richness_raster, dissolve = TRUE)
+rich_poly <- st_as_sf(rich_poly)
+
+break_points <- c(seq(1, 350, by = 50), 395)
+rich_poly <- rich_poly %>%
+  mutate(richness_bin = cut(layer,
+                            breaks = break_points,
+                            include.lowest = TRUE,
+                            right = TRUE))  # Use right = TRUE to include 395 in the last bin
+
+# Load world country boundaries
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+
+# Plot using ggplot2
+Fig8 <- ggplot() +
+  
+  # Richness polygon layer
+  geom_sf(data = rich_poly, aes(fill = richness_bin), color = NA) +
+  # Base map of countries
+  geom_sf(data = world, fill = "white", color = "gray60", size = 0.1) +
+  # Color scale for species richness
+  scale_fill_viridis_d(
+    name = "Species richness",
+    option = "C",
+    na.value = "transparent",
+    guide = guide_legend(
+      direction = "horizontal",
+      title.position = "top",
+      label.position = "bottom",
+      nrow = 1
+    )
+  ) +
+  
+  # Map projection and limits
+  coord_sf(expand = FALSE) +
+  
+  # Custom theme
+  theme_minimal(base_family = "Calibri", base_size = 11) +
+  theme(
+    legend.position = "bottom",
+    legend.box = "horizontal",
+    legend.key.width = unit(2, "cm"),
+    legend.text = element_text(size = 11, family = "Calibri"),
+    legend.title = element_text(size = 11, family = "Calibri"),
+    panel.background = element_rect(fill = "#d0f0fd", color = NA),
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.grid.major = element_line(color = "gray80", size = 0.3),
+    panel.grid.minor = element_line(color = "gray85", size = 0.2),
+    panel.border = element_rect(color = "black", fill = NA, size = 0.7)
+  ) +
+  labs(x = "Longitude", y = "Latitude") +
+  scale_x_continuous(breaks = seq(-180, 180, by = 30)) +  # More x-axis ticks
+  scale_y_continuous(breaks = seq(-90, 90, by = 30))      # More y-axis ticks
+
+# Print the plot
+print(Fig8)
+
+
+# Step 7: Save the plot
+ggsave(
+  filename = "Fig8.pdf", plot = Fig8, width = 11.7, height = 8.3, units = "in", dpi = 300
+)
+
+
+
+
+# Get bounding box of the plotted richness layer
+plot_bbox <- st_bbox(rich_poly)
+
+# Filter NHCs data to only those within the plot extent
+visible_NHCs <- NHCs_final_filtered %>%
+  filter(
+    decimalLongitude >= plot_bbox["xmin"] & decimalLongitude <= plot_bbox["xmax"],
+    decimalLatitude >= plot_bbox["ymin"] & decimalLatitude <= plot_bbox["ymax"]
+  )
+#114,548
+
+
+
+
+
+
+
+
+#### Figure 9: data completeness ####
+library(ggrepel)
+library(dplyr)
+library(showtext)
+
+font_add("Calibri", regular = "/Library/Fonts/Calibri.ttf")
+showtext_auto()
+
+
+# Step 1: Data completeness with coordinates
+records_completeness <- NHCs_final %>%
+  group_by(publisher) %>%  # Group by both publisher and institutionCode
+  summarise(
+    records_with_year = sum(!is.na(Year)),  
+    records_with_coordinates = sum(!is.na(decimalLatitude) & !is.na(decimalLongitude)),  
+    total_records = n(), 
+    .groups = 'drop'  
+  ) %>%
+  mutate(
+    Percent_with_year = (records_with_year / total_records) * 100,  
+    Percent_geolocated = (records_with_coordinates / total_records) * 100 
+) %>%
+  filter(total_records >= 100)  # Filter records where total_records >= 100
+
+print(records_completeness) #53
+
+
+# Step 2: Top 30 publishers by total number of records
+top_30_publishers <- records_completeness %>%
+  arrange(desc(total_records)) %>%
+  head(30)
+
+
+# Step 3: Get institutionCode for each publisher
+institution_codes <- NHCs_final %>%
+  group_by(publisher) %>%
+  summarise(institutionCodes = paste(unique(institutionCode), collapse = ", "), .groups = 'drop')
+
+
+# Step 4: Define short codes for top publishers
+publisher_codes <- c(
+  "Queensland Museum" = "QM",
+  "National Museum of Natural History, Smithsonian Institution" = "USNM",
+  "MNHN - Museum national d'Histoire naturelle" = "MNHN",
+  "Naturalis Biodiversity Center" = "Naturalis",
+  "Western Australian Museum" = "WAM",
+  "Natural History Museum" = "NHMUK",
+  "The National Institute of Water and Atmospheric Research (NIWA)" = "NIWA",
+  "National Museum of Nature and Science, Japan" = "NMNS",
+  "Bernice Pauahi Bishop Museum" = "BPBM",
+  "Florida Museum of Natural History" = "UF",
+  "European Nucleotide Archive (EMBL-EBI)" ="EMBL-EBI",
+  "Yale University Peabody Museum" = "YPM",
+  "Australian Museum" = "AM",
+  "United States Geological Survey" = "USGS",
+  "Museum of Comparative Zoology, Harvard University" = "MCZ",
+  "American Museum of Natural History" = "AMNH",
+  "Museum and Art Gallery of the Northern Territory" = "MAGNT",
+  "California Academy of Sciences" = "CAS",
+  "Instituto de Investigaciones Marinas y Costeras - Invemar" = "INVEMAR",
+  "Santa Barbara Museum of Natural History" ="SBMNH",
+  "Alabama Museum of Natural History" = "ALMNH",
+  "Texas A&M University Biodiversity Research and Teaching Collections" = "TCWC",
+  "Rosenstiel School, University of Miami Voss Marine Invertebrate Collection" = "UM-RSMAS",
+  "Comisión nacional para el conocimiento y uso de la biodiversidad" = "CONABIO", 
+  "Senckenberg" = "SMF",
+  "Musée Zoologique de la Ville de Strasbourg" = "MZS",
+  "CSIRO National Collections and Marine Infrastructure (NCMI) Information and Data Centre (IDC)" = "CSIRO",
+  "Swedish Museum of Natural History" = "NRM",
+  "Norwegian University of Science and Technology" = "NTNU-VM",
+  "Berkeley Natural History Museums" = "BNHM",
+  "Flanders Marine Institute" = "WoRMS",
+  "The University Museum of Zoology, Cambridge" = "UMZC",
+  "Scripps Institution of Oceanography" = "SIO",
+  "The University of the South Pacific" = "USP",
+  "Tasmanian Museum and Art Gallery" = "TMAG",
+  "South Australian Museum" = "SAMA",
+  "Auckland War Memorial Museum" = "AK",
+  "IFREMER -  French Research Institute for Exploitation of the Sea" = "IFREMER",
+  "Field Museum" = "FMNH",
+  "South African National Biodiversity Institute" = "SANBI",
+  "Canadian Museum of Nature" = "CMN",
+  "Natural History Museum of Denmark" = "NHMD",
+  "Institute of Oceanography and Environment (INOS)" = "UMT",
+  "Museu de Ciències Naturals de Barcelona" = "MCNB",
+  "Universidad del Valle" = "UniValle",
+  "Museums Victoria" = "NMV",
+  "Universidad de los Andes" = "UniAndes",
+  "National Marine Biodiversity Institute Of Korea" = "MABIK",
+  "Caribbean OBIS Node" = "FCMM_UCV",
+  "Royal British Columbia Museum" = "RBCM",
+  "Denver Museum of Nature & Science" = "DMNS",
+  "Departamento de Biologia Animal, Faculdade de Ciências, Universidade de Lisboa" = "DBA-FCUL",
+  "Eduardo Mondlane University Natural History Museum" = "MHNM"
+  )
+
+# Step 5: Join institution codes with top 30 publishers
+publishers_with_codes <- records_completeness %>%
+  left_join(institution_codes, by = "publisher") %>%
+  mutate(publisher_short_code = publisher_codes[publisher])
+print(publishers_with_codes)
+
+
+
+
+#SPLIT FIGURE
+
+labels_under <- publishers_with_codes %>%
+  filter(Percent_with_year < 97 | Percent_geolocated < 96)
+
+
+plot_A <- ggplot(records_completeness, aes(x = Percent_with_year, y = Percent_geolocated)) +
+  geom_point(aes(size = total_records, color = total_records), alpha = 0.75, stroke = 0.3) +
+  scale_size(range = c(2, 12), name = "No. of records") +
+  scale_color_viridis_c(name = "No. of records", option = "turbo") +
+  geom_text_repel(
+    data = labels_under,
+    aes(x = Percent_with_year, y = Percent_geolocated, label = publisher_short_code),
+    size = 3, color = "black", box.padding = 0.5, max.overlaps = 50
+  ) +
+  xlab("% Records with time of collection (year)") +
+  ylab("% Records with location data (coordinates)") +
+  xlim(0, 100) +
+  ylim(0, 100) +
+  theme_bw() +
+  theme(
+    text = element_text(family = "Calibri", size = 12), # Set Calibri font and font size to 11
+    axis.title = element_text(family = "Calibri", size = 12), # Set Calibri font for axis titles
+    axis.text = element_text(family = "Calibri", size = 12),  # Set Calibri font for axis text
+    legend.text = element_text(family = "Calibri", size = 12), # Set Calibri font for legend text
+    legend.title = element_text(family = "Calibri", size = 12), # Set Calibri font for legend title
+    legend.position = "bottom",  # Move legend to the bottom
+    legend.direction = "horizontal",   # Arrange legend items horizontally
+    legend.justification = "center",   # Center the legend across the bottom
+    legend.box.spacing = unit(0.1, "cm"),  # Reduce the space between plot and legend
+    legend.key.width = unit(0.1, "cm"),   # Reduce the size of the legend keys (symbols)
+    legend.spacing.x = unit(0.1, "cm"),  # Reduce space between legend items
+    legend.box.margin = margin(0, 0, 0, 0),  # Remove extra margins around the legend
+    legend.text.align = 0.5,  # Align the legend text
+    legend.key.height = unit(0.8, "cm")   # Adjust legend key height
+  ) +
+  guides(
+    size = guide_legend(nrow = 1, byrow = TRUE),  # Force legend to fit in one row
+    color = guide_legend(nrow = 1, byrow = TRUE)  # Force color legend to fit in one row
+  )
+
+print(plot_A)
+
+
+high_quality_publishers <- publishers_with_codes %>%
+  filter(Percent_with_year >= 97 & Percent_geolocated >= 96)
+
+plot_B <- ggplot(high_quality_publishers, aes(x = Percent_with_year, y = Percent_geolocated)) +
+  geom_point(aes(size = total_records, color = total_records), alpha = 0.8) +
+  geom_text_repel(aes(label = publisher_short_code), size = 3, max.overlaps = 70, force = 15) +
+  scale_size(range = c(2, 12), name = "No. of records") +
+  scale_color_viridis_c(name = "No. of records", option = "turbo") +
+  coord_cartesian(xlim = c(98.6, 100), ylim = c(96.5, 100)) +  # Zoomed view
+  theme_bw() +
+  theme(    legend.position = "none",
+            axis.title.x = element_blank(),   # Remove x-axis title
+            axis.title.y = element_blank())   # Remove y-axis title
+
+print(plot_B)
+
+
+nhmuk_current <- publishers_with_codes %>% filter(publisher_short_code == "NHMUK")
+
+plot_C <- ggplot(records_completeness, aes(x = Percent_with_year, y = Percent_geolocated)) +
+  geom_point(aes(size = total_records, color = total_records), alpha = 0.2) +
+  geom_point(data = nhmuk_current, aes(x = Percent_with_year, y = Percent_geolocated), color = "blue", size = 5) +
+  geom_point(x = 82, y = 66, color = "red", size = 5, shape = 17) +  # No aes(), just direct x and y values
+  geom_segment(data = nhmuk_current, aes(x = Percent_with_year, y = Percent_geolocated, xend = 82, yend = 66),
+               arrow = arrow(length = unit(0.25, "cm")), color = "darkred", linetype = "dashed") +
+  annotate("text", x = 82, y = 72, label = "Target", color = "red", size = 3, hjust = 0.5) +
+  annotate("text", x = nhmuk_current$Percent_with_year, y = nhmuk_current$Percent_geolocated - 3, 
+           label = "NHMUK", color = "blue", size = 3) +
+  xlim(0, 100) +
+  ylim(0, 100) +
+  theme_bw() +
+  theme(
+    legend.position = "none",
+    axis.title.x = element_blank(),   # Remove x-axis title
+    axis.title.y = element_blank()    # Remove y-axis title
+  )
+
+print(plot_C)
+
+
+library(patchwork)
+
+
+
+# Combine B and C horizontally
+top_bottom <- plot_B / plot_C
+
+print(top_bottom)
+# Combine A on top with the bottom row
+final_plot <- (plot_A | top_bottom) + 
+  plot_layout(
+    widths = c(1.7, 1),  # Set plot_A to be twice as wide as the combined plot_B + plot_C
+    heights = c(1, 1)    # Adjust height if necessary
+  ) +
+  plot_annotation(
+    tag_levels = "A"     # Automatically add labels "A", "B", "C"
+  ) +
+  theme(
+    text = element_text(family = "Calibri", size = 11),  # Calibri font and size 11 for all text
+    axis.title = element_text(family = "Calibri", size = 11),  # Calibri font for axis titles
+    axis.text = element_text(family = "Calibri", size = 11),   # Calibri font for axis text
+    legend.text = element_text(family = "Calibri", size = 11),  # Calibri font for legend text
+    legend.title = element_text(family = "Calibri", size = 11),  # Calibri font for legend title
+    plot.title = element_text(family = "Calibri", size = 11),  # Calibri font for plot title
+    plot.subtitle = element_text(family = "Calibri", size = 11), # Calibri font for plot subtitle
+    plot.caption = element_text(family = "Calibri", size = 11)  # Calibri font for plot caption
+  )
+
+print(final_plot)
+
+ggsave(
+  filename = "Fig9final_plot.pdf", plot = final_plot, 
+  width = 10, height = 10, units = "in", dpi = 300
+)
+
+
