@@ -1,0 +1,570 @@
+########################################
+# Title: GBIF Occurrence Data Processing
+# Author: Catalina Merino
+# Date: 2025-05-01
+# Description: Clean and process Scleractinia occurrence data from GBIF
+########################################
+
+
+####### Load Libraries #######
+library(tidyverse)
+library(dplyr)
+library(readxl)
+library(writexl)
+library(readr)
+library(lubridate)
+
+#### Set Working Directories ####
+data_dir <- "/Users/catalinamerino/Library/Mobile Documents/com~apple~CloudDocs/MRes classes/RP 1/GBIF Data"
+taxonomy_dir <- file.path(data_dir, "TAXONOMY")
+setwd(data_dir)
+
+
+#### Import GBIF Data ####
+gbif_data <- read_delim("occurrence.txt", delim = "\t", quote = "")
+# GBIF Download ID: https://doi.org/10.15468/dl.sfrmfb
+#1.174.971 records: GBIF.org (10 February 2025) GBIF Occurrence Download https://doi.org/10.15468/dl.sfrmfb
+
+
+#### Filter to Species-level Records ####
+species_level <- Global_data %>%
+  filter(taxonRank %in% c("SPECIES", "SUBSPECIES", "VARIETY"))
+write.csv(head(species_level), "species_level.csv", row.names = FALSE)
+#972,320 records
+
+
+
+
+#######EXTANT/FOSSIL#########
+
+#### Extract Unique Scientific Names ####
+scinames_uniqGbif <- species_level %>%
+  group_by(scientificName) %>%      
+  summarise(record_count = n())    
+# 9,042 unique sci names
+
+
+# Set the column name to 'scientificName'
+scinames_uniq.gbif <- as.data.frame(scinames_uniq.gbif)
+
+#### Divide into Batches for WoRMS ####
+write.csv(scinames_uniq.gbif[1:1400, ], "scinames_uniq.gbif_forWORMSmatch1of7.txt", row.names = FALSE, quote = FALSE)
+write.csv(scinames_uniq.gbif[1401:2800, ], "scinames_uniq.gbif_forWORMSmatch2of7.txt", row.names = FALSE, quote = FALSE)
+write.csv(scinames_uniq.gbif[2801:4200, ], "scinames_uniq.gbif_forWORMSmatch3of7.txt", row.names = FALSE, quote = FALSE)
+write.csv(scinames_uniq.gbif[4201:5600, ], "scinames_uniq.gbif_forWORMSmatch4of7.txt", row.names = FALSE, quote = FALSE)
+write.csv(scinames_uniq.gbif[5601:7000, ], "scinames_uniq.gbif_forWORMSmatch5of7.txt", row.names = FALSE, quote = FALSE)
+write.csv(scinames_uniq.gbif[7001:8400, ], "scinames_uniq.gbif_forWORMSmatch6of7.txt", row.names = FALSE, quote = FALSE)
+write.csv(scinames_uniq.gbif[8401:9800, ], "scinames_uniq.gbif_forWORMSmatch7of7.txt", row.names = FALSE, quote = FALSE)
+
+#manually create a .xls file with each .txt created
+#use match taxa tool (WoRMS) with each file and check for ambiguous records
+
+#merge results 
+setwd("/Users/catalinamerino/Library/Mobile Documents/com~apple~CloudDocs/MRes classes/RP 1/GBIF Data/TAXONOMY")
+
+file_dir <- "/Users/catalinamerino/Library/Mobile Documents/com~apple~CloudDocs/MRes classes/RP 1/GBIF Data/TAXONOMY"
+file_list <- c(
+  "1of7_matched.xlsx",
+  "2of7_matched.xlsx",
+  "3of7_matched.xlsx",
+  "4of7_matched.xlsx",
+  "5of7_matched.xlsx",
+  "6of7_matched.xlsx",
+  "7of7_matched.xlsx")
+
+# Combine the full file paths
+file_paths <- file.path(file_dir, file_list)
+
+# Read all the files and combine them into one data frame
+combined_data_TAXONOMY <- file_paths %>%
+  lapply(read_excel) %>%   
+  bind_rows()             
+head(combined_data_TAXONOMY)
+
+write.csv(combined_data_TAXONOMY, "combined_data_TAXONOMY.csv", row.names = FALSE)
+
+#check mannually for ambiguous match
+
+#WoRMS result, I changed the name of the file combined_data_TAXONOMY--> Taxonomy_update after I checked mannually some species # 
+#now import result 
+
+taxonomy_update <- read_xlsx("Taxonomy_update.xlsx") 
+
+
+        
+        
+#### process for remove EXTINCT records ####
+
+#1. Upload reference of reference list of accepted Scleractinia  (includes extinct and extant species) 
+species_status <- read_xlsx("WoRMS Scleractinia feb 2025.xlsx")
+
+
+#2. Add column Status to the taxonomy_update dataset
+taxonomy_update_status <- taxonomy_update %>%
+  mutate(Status = case_when(
+    ScientificName_accepted %in% species_status$ScientificName_accepted ~ 
+      species_status$Status[match(ScientificName_accepted, species_status$ScientificName_accepted)], 
+    TRUE ~ NA_character_  # If no match is found, fill with NA
+  )) %>%
+  # Additional conditional updates
+  mutate(Status = case_when(
+    scientificName == "Tubastrea tenuilamellosa (Milne-Edwards & Haime, 1848)" ~ NA_character_,  
+    scientificName == "Porites panamensis Vaughan, 1919" ~ "EXTINCT",
+    TRUE ~ Status  # Keep the Status unchanged for other records
+  ))
+
+
+
+#3. MERGE taxonomy_update_status AND species.level#
+updated_species_level <- species_level %>%
+  left_join(
+    taxonomy_update_status %>%
+      select(scientificName, ScientificName_accepted, Authority_accepted, Status, Family, Genus),  # Select specific columns
+    by = "scientificName")
+
+
+
+#4. Retain only extant specimen for following analysis 
+EXTANT <- updated_species_level %>%
+  filter(Status == "EXTANT") 
+
+
+
+
+
+#### Now I split between ZOO-AZOO #### 
+#1. Import List of Scleractinia classified
+Azoo_Zoo <- read_xlsx("Zoo-Azoo-Scleractinia_updated.xlsx") 
+
+#2. Merge
+EXTANT <- EXTANT %>%
+  left_join(Azoo_Zoo %>% select(ScientificName_accepted, zooxanthellate), by = "ScientificName_accepted")
+
+
+
+
+
+#### PRESERVED ####
+#1. extract preserved specimen
+PRESERVED <- EXTANT %>%
+  filter(basisOfRecord == "PRESERVED_SPECIMEN")
+#193,701
+
+#2. create specimen column
+PRESERVED <- PRESERVED %>%
+  mutate(specimens = ifelse(!is.na(individualCount) & individualCount >= 1, individualCount, 1))
+
+sum(PRESERVED$specimens) #466,661
+
+
+
+#### recover YEAR ####
+#1. explore
+empty_year_subset_extant <- EXTANT %>%
+  filter(is.na(year) | year == "")  
+
+
+
+#2. make subset of empty year
+empty_year_subset <- PRESERVED %>%
+  filter(is.na(year) | year == "")  
+
+
+#3. extract verbatimEventDate data from no year subset
+verbatim_date_count <- empty_year_subset %>%
+  group_by(verbatimEventDate) %>%
+  summarise(record_count = n()) %>%
+  arrange(desc(record_count)) 
+
+noyear_data <- read_csv("verbatim_date_count.csv")
+
+
+#4. create function
+extract_year <- function(date_string) {
+  # Remove any leading or trailing whitespace
+  date_string <- trimws(date_string)
+  
+  # Handle cases starting with "Pre" (treat as ambiguous and return NA)
+  if (grepl("^Pre|approximately", date_string, ignore.case = TRUE)) {
+    return(NA)  # Return NA for ambiguous "Pre" or "approximately" cases
+  }
+  
+  # Special case handling for the three specific formats
+  if (grepl("^April 1930 \\(begin\\)$", date_string, ignore.case = TRUE)) {
+    return(1930)
+  }
+  if (grepl("^april 1930 begin$", date_string, ignore.case = TRUE)) {
+    return(1930)
+  }
+  if (grepl("^begin April 1930$", date_string, ignore.case = TRUE)) {
+    return(1930)
+  }
+  
+  # 0. Check for "no date recorded" and return NA immediately
+  if (grepl("no date recorded", date_string, ignore.case = TRUE)) {
+    return(NA)
+  }
+  
+  # 1. Handle Roman numeral dates (e.g., vii.-ix.1904)
+  if (grepl("^vii\\.-ix\\.\\d{4}$", date_string)) {
+    return(1904)  # Treat as a year based on the string
+  }
+  
+  # 2. Handle "YYYY Month" format (e.g., "1974 June", "1979 April", etc.)
+  if (grepl("^\\d{4}\\s+[A-Za-z]+$", date_string)) {
+    return(as.numeric(substr(date_string, 1, 4)))  # Extract year from the start
+  }
+  
+  # 3. Handle xx-yy-YYYY format (e.g., xx-yy-1961, xx-yy-1968, etc.)
+  if (grepl("^\\d{2}-\\d{2}-\\d{4}$", date_string)) {
+    return(as.numeric(substr(date_string, nchar(date_string) - 3, nchar(date_string))))
+  }
+  
+  # 4. Handle month names in German (e.g., Juni 1972)
+  if (grepl("juni|mai|märz|März|oktober|august|dezember|februar|märz|juli|julin", date_string)) {
+    year_match <- regmatches(date_string, regexpr("\\d{4}", date_string))
+    if (length(year_match) > 0) {
+      return(as.numeric(year_match))
+    }
+  }
+  
+  # 5. Handle "Circa 1980" format
+  if (grepl("^circa \\d{4}$", date_string)) {
+    return(as.numeric(substr(date_string, 7, 10)))  # Extract the year
+  }
+  
+  # 6. Handle "8/*/1983" format (or any other similar formats)
+  if (grepl("^\\d{1,2}/\\*/\\d{4}$", date_string)) {
+    return(as.numeric(substr(date_string, nchar(date_string) - 3, nchar(date_string))))
+  }
+  
+  # 7. Handle "*/*/YYYY" format (e.g., "*/8/1962", "*/5/1978")
+  if (grepl("^\\*/\\*/\\d{4}$", date_string)) {
+    return(as.numeric(substr(date_string, nchar(date_string) - 3, nchar(date_string))))
+  }
+  
+  # 8. Handle "3/17-19/1998" format (e.g., range with same year)
+  if (grepl("^\\d{1,2}/\\d{2}-\\d{2}/\\d{4}$", date_string)) {
+    return(as.numeric(substr(date_string, nchar(date_string) - 3, nchar(date_string))))
+  }
+  
+  # 9. Handle date ranges where the year is the same or different (e.g., Jan 1978 - Apr 1979 or Jan 1978 to Apr 1979)
+  if (grepl("([A-Za-z]+ \\d{4})\\s*(?:-|to)\\s*([A-Za-z]+ \\d{4})$", date_string)) {
+    # Extract both years from the range using regular expressions
+    years <- unlist(regmatches(date_string, gregexpr("\\d{4}", date_string)))
+    
+    # Debugging step: Print extracted years to ensure correct extraction
+    print(years)
+    
+    # Ensure we have two years extracted
+    if (length(years) == 2) {
+      # If the years are different, return NA
+      if (years[1] != years[2]) {
+        return(NA)  # Return NA if years are different
+      } else {
+        return(as.numeric(years[1]))  # Return the year if both are the same
+      }
+    } else {
+      return(NA)  # Return NA if two years are not extracted
+    }
+  }
+  
+  
+  # 10. Handle "1 November 1976-31 December 1976"
+  if (grepl("\\d{1,2} [A-Za-z]+ \\d{4}-\\d{1,2} [A-Za-z]+ \\d{4}", date_string)) {
+    year <- year(dmy(strsplit(date_string, "-")[[1]][1]))  # Extract year from the first date in the range
+    return(year)
+  }
+  
+  # 11. Handle "xx-yy-YYYY" formats (where only the year is clear)
+  if (grepl("^.{2}-.{2}-\\d{4}$", date_string)) {
+    return(as.numeric(substr(date_string, nchar(date_string) - 3, nchar(date_string))))
+  }
+  
+  # 12. Handle ambiguous 2-digit years (e.g., "16/09/84" could be 1984 or 1884)
+  if (grepl("^\\d{2}/\\d{2}/\\d{2}$", date_string)) {
+    return(NA)  # Return NA as it's indeterminable (could be 1984 or 1884)
+  }
+  
+  # 13. Handle indeterminable cases like "Indeterminable {? no year June 12}"
+  if (grepl("Indeterminable", date_string)) {
+    return(NA)
+  }
+  
+  # 14. Handle "03/1916" format (month-year)
+  if (grepl("^\\d{2}/\\d{4}$", date_string)) {
+    return(as.numeric(substr(date_string, 4, 7)))  # Extract the year
+  }
+  
+  # 15. Handle "10 16" format (month-day, no year)
+  if (grepl("^\\d{2} \\d{2}$", date_string)) {
+    return(NA)  # Return NA as no year is provided
+  }
+  
+  # 16. Handle incomplete year (e.g., "1904-07-" should return 1904)
+  if (grepl("^\\d{4}-\\d{2}-?$", date_string)) {
+    return(as.numeric(substr(date_string, 1, 4)))  # Extract the year
+  }
+  
+  # 17. Handle formats like "xx-05-1920"
+  if (grepl("^\\d{2}-05-\\d{4}$", date_string)) {
+    return(as.numeric(substr(date_string, 7, 10)))  # Extract the year
+  }
+  
+  # 18. Handle formats like "10 June 1922 (namiddag)" or "12 Jun 1922 (voormiddag)"
+  if (grepl("^\\d{1,2} [A-Za-z]+ \\d{4}", date_string)) {
+    return(as.numeric(substr(date_string, nchar(date_string)-3, nchar(date_string))))  # Extract the year
+  }
+  
+  # 19 Handle ambiguous 2-digit years Apr-52", "Aug-28", "Jan-49"
+  if (grepl("^[A-Za-z]{3}-\\d{2}$", date_string)) {
+    return(NA)  # Return NA for cases like "Apr-52", "Aug-28", "Jan-49"
+  }
+  
+  # 20. Handle formats like "Jul 1944", "Aug 1945" (Month Year format)
+  if (grepl("^[A-Za-z]{3} \\d{4}$", date_string)) {
+    return(as.numeric(substr(date_string, nchar(date_string)-3, nchar(date_string))))  # Extract the year
+  }
+  
+  # 20. Handle formats like "April 1952", "May 1950" (Month Year format)
+  if (grepl("^[A-Za-z]+ \\d{4}(\\s*[^A-Za-z0-9].*)?$", date_string)) {
+    return(as.numeric(substr(date_string, nchar(date_string)-3, nchar(date_string))))  # Extract the year
+  }
+  
+  # 21. Handle "-- --- 1884", "-- --- 1913", "-- --- 1914", or similar formats
+  if (grepl("^-- --- \\d{4}$", date_string)) {
+    return(as.numeric(substr(date_string, 8, 11)))  # Extract the year
+  }
+  
+  # 22. Handle standard Month-Day-Year formats (e.g., "11 May 1923")
+  if (!is.na(dmy(date_string))) {
+    return(year(dmy(date_string)))  # DD-MM-YYYY
+  } else if (!is.na(mdy(date_string))) {
+    return(year(mdy(date_string)))  # MM/DD/YYYY
+  } else if (!is.na(ymd(date_string))) {
+    return(year(ymd(date_string)))  # YYYY-MM-DD
+  } else if (grepl("^\\d{4}$", date_string)) {
+    return(as.numeric(date_string))  # Only a year (e.g., 1993)
+  }
+  # 23. Handle "DD.MM.YYYY-DD.MM.YYYY" format (e.g., "21.07.1967-21.07.1967")
+  if (grepl("^\\d{2}\\.\\d{2}\\.\\d{4}\\s*-\\s*\\d{2}\\.\\d{2}\\.\\d{4}$", date_string)) {
+    # Extract and return the year (last 4 digits of the range)
+    return(as.numeric(substr(date_string, nchar(date_string) - 3, nchar(date_string))))
+  }
+  
+  # 24. Handle "YYYY-MM - YYYY-MM" format (e.g., "1987-11 - 1987-12")
+  if (grepl("^\\d{4}-\\d{2}\\s*-\\s*\\d{4}-\\d{2}$", date_string)) {
+    # Extract and return the year (last 4 digits of the range)
+    year_match <- regmatches(date_string, regexpr("\\d{4}", date_string))
+    return(as.numeric(year_match[1]))  # Extract the first matched year
+  }
+  #25. # Handle "MM/YYYY-MM/YYYY" format (e.g., "01/1983-04/1983")
+  if (grepl("^\\d{2}/\\d{4}-\\d{2}/\\d{4}$", date_string)) {
+    # Extract the years from both parts of the range (before and after the hyphen)
+    years <- unlist(regmatches(date_string, gregexpr("\\d{4}", date_string)))
+    
+    # If we have two years extracted, return the year (you can return either year because they are the same in this format)
+    if (length(years) == 2) {
+      return(as.numeric(years[1]))  # Return the first year (they should be the same in this format)
+    } else {
+      return(NA)  # Return NA if the format is not as expected
+    }
+  }
+  
+  # If none of the above formats match, return NA
+  return(NA)
+}
+
+#5. Apply the function to the 'verbatimEventDate' column to handle these cases 
+noyear_data$extracted_year <- sapply(noyear_data$verbatimEventDate, extract_year)
+
+#6. Add validation for years > 2025 or < 1600  
+noyear_data$extracted_year <- ifelse(noyear_data$extracted_year > 2025 | noyear_data$extracted_year < 1600, NA, noyear_data$extracted_year)
+
+
+#check if recovery was possible 
+sum(noyear_data$record_count) #66,893 originally with no year
+sum(noyear_data$record_count[is.na(noyear_data$extracted_year)]) #43,932 with no year 
+
+
+
+#7.Merge the empty_year_subset with noyear_data based on the 'verbatimEventDate' column
+
+merged_data_year <- merge(empty_year_subset, noyear_data[, c("verbatimEventDate", "extracted_year")], 
+                          by = "verbatimEventDate", all.x = TRUE)
+
+PRESERVED <- PRESERVED %>%
+  left_join(merged_data_year[, c("gbifID", "extracted_year")], by = "gbifID") %>%
+  mutate(
+    Year = ifelse(!is.na(year), year, extracted_year)  
+  ) %>%
+  select(-extracted_year)  
+head(PRESERVED)
+
+#check if new column is ok, NAs in year > Year
+na_count_year <- sum(is.na(PRESERVED$year))
+print(paste("Number of NAs in 'year' column:", na_count_year)) #66,893
+
+na_count_Year <- sum(is.na(PRESERVED$Year))
+print(paste("Number of NAs in 'Year' column:", na_count_Year)) #43,932
+
+
+
+
+#explore Catalogue Number
+total_records_with_catalogNumber <- PRESERVED %>% 
+  filter(!is.na(catalogNumber) & catalogNumber != "") %>%  
+  summarise(total = n()) #182,713 with catalogNumber
+
+
+duplicate_catalogs <- NHCs %>%
+  group_by(catalogNumber) %>%
+  summarise(record_count = n()) %>%
+  filter(record_count >= 2) %>%
+  arrange(desc(record_count))
+
+print(duplicate_catalogs)
+
+
+
+#### NHCs ####
+
+#1. REMOVE RECORDs without catalogNumber (also "NO DISPONIBLES") 
+
+NHCs <- PRESERVED %>% 
+  filter(
+    !is.na(catalogNumber) &
+      catalogNumber != "" &
+      catalogNumber != "NO DISPONIBLE"
+  )
+#182,664 with catalogNumber
+
+
+#2. flag duplicates  
+#I define duplicate when records have the same catalogNumber, publisher & scientificName
+NHCs_flagged <- NHCs %>%
+  mutate(
+    possible_duplicate = duplicated(paste(catalogNumber, publisher, scientificName)) |
+      duplicated(paste(catalogNumber, publisher, scientificName), fromLast = TRUE)
+  )
+sum(NHCs_flagged$possible_duplicate) #12,770
+
+
+
+
+#3. refine flagged "possible duplicates" into actual "duplicates"
+NHCs_deduped <- NHCs_flagged %>%
+  group_by(catalogNumber, publisher, scientificName) %>%
+  mutate(
+    duplicate_rank = case_when(
+      # Rule 1: Keep most recent modified date
+      publisher %in% c(
+        "Bernice Pauahi Bishop Museum",
+        "National Museum of Natural History, Smithsonian Institution"
+      ) ~ rank(desc(as.Date(modified)), ties.method = "first"),
+      
+      # Rule 2: Keep record with more complete data
+      publisher %in% c(
+        "Naturalis Biodiversity Center",
+        "IFREMER -  French Research Institute for Exploitation of the Sea",
+        "Natural History Museum",
+        "Abilene Christian University Natural History Collection",
+        "Florida Museum of Natural History",
+        "National Science Museum of Korea",
+        "Comisión nacional para el conocimiento y uso de la biodiversidad"
+      ) ~ rank(
+        desc(!is.na(decimalLatitude) | !is.na(decimalLongitude) |
+               !is.na(year) | !is.na(Year) |
+               !is.na(individualCount) | !is.na(countryCode) |
+               !is.na(locality) | !is.na(institutionCode)),
+        ties.method = "first"
+      ),
+      
+      # Rule 3: Keep record with disposition if possible
+      publisher == "Instituto de Investigaciones Marinas y Costeras - Invemar" ~ rank(
+        desc(!is.na(disposition)),
+        ties.method = "first"
+      ),
+      
+      # Default: keep first
+      TRUE ~ 1
+    ),
+    is_duplicate = if_else(duplicate_rank > 1, TRUE, FALSE)
+  ) %>%
+  ungroup()
+
+
+
+#4 remove duplicates
+NHCs_final <- NHCs_deduped %>%
+  filter(is_duplicate == FALSE) # 176,279 records from NHCs
+
+
+
+
+
+
+
+
+
+#### NHMUK STUDY #### 
+nhm_records <- subset(NHCs_final, publisher == "Natural History Museum")
+
+# Check for duplicates by catalogNumber
+duplicate_catalogNumber <- nhm_records %>%
+  count(catalogNumber) %>%
+  filter(n > 1)
+duplicate_catalogNumber
+
+# Subset records with duplicate catalogNumber
+duplicate_subset_NHMUK <- nhm_records %>%
+  group_by(catalogNumber) %>%
+  filter(n() > 1) %>%
+  ungroup()
+
+
+
+nhm_with_coords <- subset(nhm_records, !is.na(decimalLatitude) & !is.na(decimalLongitude))
+count <- nrow(nhm_with_coords) #2,140 
+
+# Records WITHOUT coordinates
+nhm_no_coords <- subset(nhm_records, is.na(decimalLatitude) | is.na(decimalLongitude)) #7089
+
+# Records without coordinates BUT with locality description
+nhm_no_coords_locality <- subset(nhm_no_coords, !is.na(locality) & locality != "") #5388
+
+#subset Records without coordinates BUT with locality description
+nhm_no_coords_locality <- nhm_no_coords_locality %>%
+  dplyr::select(decimalLatitude, decimalLongitude, locality, Year,
+                depth,
+                countryCode,
+                waterBody,
+                island,
+                islandGroup, everything()) #5,388
+
+unique(nhm_no_coords_locality$locality)#1,351
+
+
+# #High-detail descriptions 
+nhm_complete_meta <- nhm_no_coords_locality %>%
+  filter(!is.na(depth), !is.na(Year))
+#525
+
+# Records WITHOUT year
+nhm_no_year <- subset(nhm_records, is.na(Year)) #5,097
+
+library(dplyr)
+
+# Records WITHOUT year but has collector = 1300 
+nhm_no_year_collector <- nhm_no_year %>%
+  filter(!is.na(recordedBy) & recordedBy != "") %>%
+  select(
+    decimalLatitude, decimalLongitude, recordedBy, locality, Year,
+    verbatimEventDate, eventDate, depth, countryCode, waterBody,
+    island, islandGroup, everything()
+  )
+
+
+
+
+
